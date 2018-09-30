@@ -38,59 +38,45 @@ const video = {
 	pin: new blynk.VirtualPin(3),
 };
 
-sensor.gpio.glitchFilter(10000);
-sensor.gpio.on('alert', (value, tick) => { 
-	console.log('Door Sensor State Change:', value);
-	console.log('State is now: ' + doorStateString(value));
-	
-	// push doorStatus state to device
-	blynk.virtualWrite(doorStatus.id, doorStateString(sensor.gpio.digitalRead()));
-});
+const autoCloseTimer = {
+  timer: setTimeout(() => {}, 10),
+  startTimer: function() {
+    autoCloseTimer.timer = setTimeout(() => { closeGarageDoor(); }, 1800000);
+    //autoCloseTimer.timer = setTimeout(() => { closeGarageDoor(); }, 120000);
+  },
+  stopTimer: function() {
+    try {
+      clearTimeout(autoCloseTimer.timer);
+    }
+    catch(error) {
+      console.error(error);
+    }
+  }
+};
 
-open.pin.on('write', function(param) {
-	console.log('open:', param);
+const openGarageDoor = function openGarageDoor() {
+  console.log('Open Door Request');
 
-	let value = param[0]
-	if(value == '1') {
-		console.log('Open Door Request');
+  if (sensor.gpio.digitalRead()) {
+    console.log('Door Already Open... Skipping!');
+  }
+  else {
+    console.log('Door Closed...  Opening!');
+    triggerRelay();
+  }
+}
 
-		if(sensor.gpio.digitalRead()) {
-			console.log('Door Already Open... Skipping!');
-		}
-		else {
-			console.log('Door Closed...  Opening!');
-			triggerRelay();
-		}
-	}
+const closeGarageDoor = function closeGarageDoor() {
+  console.log('Close Door Request');
 
-	// push current state to device
-	blynk.virtualWrite(doorStatus.id, doorStateString(sensor.gpio.digitalRead()));
-});
-
-close.pin.on('write', function(param) {
-	console.log('close:', param);
-
-	let value = param[0]
-	if(value == '1') {
-		console.log('Close Door Request');
-
-		if(!sensor.gpio.digitalRead()) {
-			console.log('Door Already Closed... Skipping!');
-		}
-		else {
-			console.log('Door Open...  Closing!');
-			triggerRelay();
-		}
-	}
-
-	// push current state to virtual pin 9
-	blynk.virtualWrite(doorStatus.id, doorStateString(sensor.gpio.digitalRead()));
-});
-
-doorStatus.pin.on('read', function() {
-	let sensorValue = sensor.gpio.digitalRead();
-	doorStatus.pin.write(doorStateString(sensorValue));
-});
+  if (!sensor.gpio.digitalRead()) {
+    console.log('Door Already Closed... Skipping!');
+  }
+  else {
+    console.log('Door Open...  Closing!');
+    triggerRelay();
+  }
+}
 
 const triggerRelay = function triggerRelay() {
 	if(!relay.isEnabled) {
@@ -109,6 +95,15 @@ const triggerRelay = function triggerRelay() {
 	setTimeout(() => relay.gpio.digitalWrite(0), 750 );
 };
 
+const triggerAutoCloseTimer = function(doorIsOpen) {
+	if(doorIsOpen) {
+    autoCloseTimer.startTimer();
+  }
+  else {
+    autoCloseTimer.stopTimer();
+  }
+};
+
 const doorStateString = function(doorIsOpen) {
 	if(doorIsOpen){
 		return "OPEN";
@@ -117,6 +112,54 @@ const doorStateString = function(doorIsOpen) {
 		return "CLOSED";
 	}
 }
+
+sensor.gpio.glitchFilter(10000);
+sensor.gpio.on('alert', (sensorState, tick) => {
+  let dss = doorStateString(sensorState);
+	console.log('Door Sensor State Change:', sensorState);
+	console.log('State is now: ' + dss);
+	//sensorState = sensor.gpio.digitalRead();
+
+	// push doorStatus state to app on device
+	blynk.virtualWrite(doorStatus.id, dss);
+	
+	// send notification to device
+	console.log('Begin: Sending push notification.');
+	blynk.notify('Your garage door is now ' + dss + '!');
+	console.log('Done: Sending push notification.');
+	
+	// set an auto close timer
+	triggerAutoCloseTimer(sensorState)
+});
+
+open.pin.on('write', function(param) {
+	console.log('open signal sent:', param);
+
+	let value = param[0]
+	if(value == '1') {
+    openGarageDoor();
+	}
+
+	// push current state to device
+	blynk.virtualWrite(doorStatus.id, doorStateString(sensor.gpio.digitalRead()));
+});
+
+close.pin.on('write', function(param) {
+	console.log('close signal sent:', param);
+
+	let value = param[0]
+	if(value == '1') {
+    closeGarageDoor();
+	}
+
+	// push current state to virtual pin 9
+	blynk.virtualWrite(doorStatus.id, doorStateString(sensor.gpio.digitalRead()));
+});
+
+doorStatus.pin.on('read', function() {
+	let sensorValue = sensor.gpio.digitalRead();
+	doorStatus.pin.write(doorStateString(sensorValue));
+});
 
 
 // ******** setup / teardown *********
